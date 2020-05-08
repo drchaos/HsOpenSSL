@@ -390,3 +390,22 @@ long HsOpenSSL_SSL_clear_options(SSL* ssl, long options) {
     return SSL_set_options(ssl, tmp & ~options);
 #endif
 }
+
+int HsOpenSSL_add_ext(X509 *ca, X509 *cert, int nid, char *value) {
+	X509_EXTENSION *ex;
+	X509V3_CTX ctx;
+	/* This sets the 'context' of the extensions. */
+	/* No configuration database */
+	X509V3_set_ctx_nodb(&ctx);
+	/* Issuer and subject certs: both the target since it is self signed,
+	 * no request and no CRL
+	 */
+	X509V3_set_ctx(&ctx, ca, cert, NULL, NULL, 0);
+	ex = X509V3_EXT_conf_nid(NULL, &ctx, nid, value);
+	if (!ex)
+		return 0;
+
+	X509_add_ext(cert,ex,-1);
+	X509_EXTENSION_free(ex);
+	return 1;
+}

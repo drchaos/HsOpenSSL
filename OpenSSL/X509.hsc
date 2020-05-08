@@ -47,6 +47,9 @@ module OpenSSL.X509
     , setPublicKey
 
     , getSubjectEmail
+
+    , addExtensions
+    , getExtension
     )
     where
 #include "HsOpenSSL.h"
@@ -75,6 +78,8 @@ import Data.ByteString.Lazy (ByteString)
 -- |@'X509'@ is an opaque object that represents X.509 certificate.
 newtype X509  = X509 (ForeignPtr X509_)
 data    X509_
+
+data    X509_EXT_
 
 
 foreign import ccall unsafe "X509_new"
@@ -160,6 +165,21 @@ foreign import ccall safe "d2i_X509_bio"
         _read_bio_X509 :: Ptr BIO_
                        -> Ptr (Ptr X509_)
                        -> IO (Ptr X509_)
+
+foreign import ccall unsafe "HsOpenSSL_add_ext"
+        _add_ext :: Ptr X509_ -> Ptr X509_ -> CInt -> CString -> IO CInt
+
+foreign import ccall unsafe "X509_get_ext"
+        _get_ext :: Ptr X509_ -> CInt -> IO (Ptr X509_EXT_)
+
+foreign import ccall unsafe "X509_EXTENSION_get_object"
+        _get_ext_obj :: Ptr X509_EXT_ -> IO (Ptr ASN1_OBJECT)
+
+foreign import ccall unsafe "X509_EXTENSION_get_data"
+        _get_ext_data :: Ptr X509_EXT_ -> IO CString
+
+foreign import ccall unsafe "X509_EXTENSION_get_critical"
+        _get_ext_crit :: Ptr X509_EXT_ -> IO CInt
 
 -- |@'newX509'@ creates an empty certificate. You must set the
 -- following properties to and sign it (see 'signX509') to actually
@@ -428,3 +448,29 @@ getSubjectEmail x509
          list <- mapStack peekCString st
          _email_free st
          return list
+
+
+-- |@'addExtensions' req [(nid, str)]@
+--
+-- E.g., nid 85 = 'subjectAltName' http://osxr.org:8080/openssl/source/crypto/objects/objects.h#0476
+--
+-- (TODO: more docs; NID type)
+addExtensions :: X509 -> X509 -> [(Int, String)] -> IO [CInt]
+addExtensions ca x509 exts =
+  withX509Ptr ca $ \caPtr -> do
+    withX509Ptr x509 $ \x509Ptr -> do
+      forM exts $ \(nid, str) -> withCString str $ _add_ext caPtr x509Ptr (fromIntegral nid)
+
+getExtension :: X509 -> Int -> IO (Maybe (Int, String, Int))
+getExtension x509 loc
+    = withX509Ptr x509 $ \ x509Ptr -> do
+        ext <- _get_ext x509Ptr (fromIntegral loc)
+        if ext == nullPtr
+           then return Nothing
+           else do
+             obj <- _get_ext_obj ext
+             d <- peekCString =<< _get_ext_data ext
+             crit <- _get_ext_crit ext
+             nid <- obj2nid obj
+             return $ Just (fromIntegral nid, d, fromIntegral crit)
+
